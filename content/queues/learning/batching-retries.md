@@ -28,6 +28,49 @@ For example, a `max_batch_size = 30` and a `max_batch_timeout = 10` means that i
 
 When determining what size and timeout settings to configure, you will want to take into account latency (how long can you wait to receive messages?), overall batch size (when writing to external systems), and cost (fewer-but-larger batches). 
 
+## Explicit acknowlegment
+
+You can acknowledge individual messages with a batch by explicitly acknowledging each message as it is processed. Messages that are explicitly acknowledged will not be re-delivered, even if your queue consumer fails on a subsequent message and/or fails to return successfully when processing a batch.
+
+* Each message can be acknowledged as you process it within a batch, and avoids the entire batch from being re-delivered if your consumer throws an error during batch processing.
+* It can be particularly useful when you are calling external APIs, writing messages to a database, or otherwise performing non-idempotent actions on individual messages.
+
+To explicitly acknowledge a message as delivered, call the `.ack()` method on the message. 
+
+```ts
+export default {
+  async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
+    for (const msg of batch.messages) {
+
+    // TODO: do something with the message
+    // Explicitly acknowledge the message as delivered
+    msg.ack()
+
+    }
+  },
+};
+```
+
+You can also call `.retry()` to explicitly force a message to be re-delivered in a subsequent batch. This can be particularly useful when you want process the rest of the messages in that batch without throwing an error that would force the entire batch to be re-delivered.
+
+```ts
+export default {
+  async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext) {
+    for (const msg of batch.messages) {
+
+    // TODO: do something with the message that fails
+    msg.retry()
+
+    }
+  },
+};
+```
+
+Notes:
+
+* If you call `.ack()` on a message, subsequent calls to `.ack()` or `.retry()` are silently ignored. The same applies if you call `.retry()` on a message and then call `.ack()`: the `.ack()` is ignored. The first method call wins in all cases.
+* Although you can call `.ackAll()` on the batch of messages (`MessageBatch`) delivered to your consumer, this is the same as a consumer that successfully returns (does not throw an error).
+
 ## Retries
 
 When a message is failed to be delivered, the default behaviour is to retry delivery three times before marking the delivery as failed (refer to [Dead Letter Queues](#dead-letter-queues)). You can set `max_retries` (defaults to 3) when configuring your consumer, but in most cases we recommend leaving this as the default.
@@ -38,7 +81,7 @@ Each retry counts as an additional read operation per [Queues pricing](https://d
 
 {{</Aside>}}
 
-When a single message within a batch fails to be delivered, the entire batch is retried. For example, if a batch of 10 messages is delivered, but the 8th message fails to be delivered, all 10 messages will be retried and thus re-delivered to your consumer in full.
+When a single message within a batch fails to be delivered, the entire batch is retried, unless you have [explicitly acknowledged](#explicit-acknowlegment) a message (or messages) within that batch. For example, if a batch of 10 messages is delivered, but the 8th message fails to be delivered, all 10 messages will be retried and thus re-delivered to your consumer in full.
 
 ## Dead Letter Queues
 
